@@ -1,0 +1,8 @@
+{
+  "server": "https://matrix.org",
+  "user_id": "@your_bot_account:matrix.org",
+  "password": "your_password",
+  "poll_interval_seconds": 3600,
+  "allow_new_rooms": true,
+  "rooms": ["a_list_of_room_id"]
+}
