@@ -10,8 +10,9 @@ so the bot resolves the current one and shares it automatically.
   `t.me/s/Streaming_community_sito` (no authentication required) and verifies it
   responds before using it.
 - **Multi-room with auto-join**: anyone can invite the bot to their room; it
-  joins automatically (can be disabled via `allow_new_rooms`) and posts a
-  welcome message.
+  joins automatically (can be disabled via `allow_new_rooms`), posts a welcome
+  message, and then sends and pins the current link right away instead of waiting
+  for the next poll cycle.
 - **Announces new links**: it periodically polls for the latest domain and, when
   it changes, sends the new link to each room — once per room (it won't re-send
   the same link, even across restarts).
