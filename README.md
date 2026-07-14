@@ -54,7 +54,6 @@ so the bot resolves the current one and shares it automatically.
    | `poll_interval_seconds` | number | How often (in seconds) the bot checks for a new domain. Use a large value in production (e.g. `3600`); small values are only for testing. |
    | `allow_new_rooms` | boolean | If `true`, the bot auto-joins rooms it's invited to; if `false`, it ignores new invites. Re-read on every invite, so it takes effect without a restart. |
    | `verify_pinned_link` | boolean | If `true`, every cycle the bot re-checks on the server that its link is still present and pinned, re-pinning or re-posting if not. Adds one extra request per room per cycle; disabled by default. |
-   | `rooms` | array | **Currently unused** by the bot (it operates on every room it has joined). Reserved for a future room whitelist. |
 
 3. Run it:
    ```sh
