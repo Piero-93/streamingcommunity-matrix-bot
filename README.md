@@ -25,6 +25,9 @@ so the bot resolves the current one and shares it automatically.
   fresh one. Disabled by default (it adds an extra request per room each cycle).
 - **Skips rooms it can't post in**: rooms where the bot lacks permission to send
   (e.g. the matrix.org official/system room) are skipped instead of erroring.
+- **Cleans up after itself**: when the bot is removed from (or leaves) a room, its
+  saved state for that room is dropped, so if it's ever re-invited the room is
+  treated as fresh.
 
 ## Setup
 
@@ -46,14 +49,14 @@ so the bot resolves the current one and shares it automatically.
    }
    ```
 
-   | Key | Type | What it does |
-   |-----|------|--------------|
-   | `server` | string | Base URL of the Matrix homeserver the bot logs in to (e.g. `https://matrix.org`). |
-   | `user_id` | string | Full Matrix ID of the bot account, in the form `@name:server`. |
-   | `password` | string | Password for the bot account, used to log in. Keep it secret — `config.json` is git-ignored. |
-   | `poll_interval_seconds` | number | How often (in seconds) the bot checks for a new domain. Use a large value in production (e.g. `3600`); small values are only for testing. |
-   | `allow_new_rooms` | boolean | If `true`, the bot auto-joins rooms it's invited to; if `false`, it ignores new invites. Re-read on every invite, so it takes effect without a restart. |
-   | `verify_pinned_link` | boolean | If `true`, every cycle the bot re-checks on the server that its link is still present and pinned, re-pinning or re-posting if not. Adds one extra request per room per cycle; disabled by default. |
+| Key                     | Type    | What it does                                                                                                                                                                                       |
+| -------------------------| ---------| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `server`                | string  | Base URL of the Matrix homeserver the bot logs in to (e.g. `https://matrix.org`).                                                                                                                  |
+| `user_id`               | string  | Full Matrix ID of the bot account, in the form `@name:server`.                                                                                                                                     |
+| `password`              | string  | Password for the bot account, used to log in. Keep it secret — `config.json` is git-ignored.                                                                                                       |
+| `poll_interval_seconds` | number  | How often (in seconds) the bot checks for a new domain. Use a large value in production (e.g. `3600`); small values are only for testing.                                                          |
+| `allow_new_rooms`       | boolean | If `true`, the bot auto-joins rooms it's invited to; if `false`, it ignores new invites. Re-read on every invite, so it takes effect without a restart.                                            |
+| `verify_pinned_link`    | boolean | If `true`, every cycle the bot re-checks on the server that its link is still present and pinned, re-pinning or re-posting if not. Adds one extra request per room per cycle; disabled by default. |
 
 3. Run it:
    ```sh

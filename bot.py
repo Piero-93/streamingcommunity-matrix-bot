@@ -89,6 +89,9 @@ async def main():
         """Periodically fetch the latest domain and, per room, send+pin it once when it changes."""
         interval = config["poll_interval_seconds"]
         verify = config.get("verify_pinned_link", False)
+        # Wait for the first sync so client.rooms is populated before we act on it
+        # (otherwise the first cycle would see no rooms and prune all saved state).
+        await client.synced.wait()
         while True:
             domain = await asyncio.to_thread(fetch_latest_domain)
             if domain is not None:
@@ -134,6 +137,11 @@ async def main():
                                 rooms_state[r] = info
                             else:
                                 logger.error(f"Failed to pin message in {room_label}: {pin_response}")
+                # Drop state for rooms the bot is no longer a member of (kicked/left), so a
+                # future re-join is treated as fresh instead of "already sent".
+                for stale in [rid for rid in rooms_state if rid not in client.rooms]:
+                    logger.info(f"Removing state for room no longer joined: {stale}")
+                    del rooms_state[stale]
                 state["rooms"] = rooms_state
                 state["domain"] = domain
                 save_state(state)
