@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 def  verify_domain(domain: str) -> bool:
+    """Return True if https://<domain> answers with a non-error status (< 400)."""
     try:
         status = requests.get(f"https://{domain}", timeout=10, headers={"User-Agent": "Mozilla/5.0"})
         if(status.status_code < 400): # 2xx -> OK, 3xx -> Redirects
@@ -34,6 +35,11 @@ def  verify_domain(domain: str) -> bool:
         return False
 
 def fetch_latest_domain():
+    """Scrape the latest announced domain from the Telegram channel and verify it.
+
+    Returns the working domain, or None if the channel is unreachable, no domain
+    is found, or the latest one fails verification.
+    """
     try:
         html = requests.get("https://t.me/s/Streaming_community_sito", timeout=10)
     except requests.exceptions.RequestException as e:

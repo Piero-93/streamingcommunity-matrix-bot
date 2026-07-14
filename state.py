@@ -18,12 +18,14 @@ import json
 STATE_FILE = "state.json"
 
 def load_state():
+    """Load the persisted state from disk, or an empty dict if it doesn't exist yet."""
     try:
         with open(STATE_FILE) as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
-    
+
 def save_state(state):
+    """Persist the given state dict to disk as JSON."""
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
