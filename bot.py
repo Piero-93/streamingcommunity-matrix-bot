@@ -1,7 +1,9 @@
 import json
 import asyncio
 import logging
-from nio import AsyncClient, LoginResponse, InviteMemberEvent
+from nio import AsyncClient, LoginResponse, InviteMemberEvent, RoomSendResponse
+from telegram_source import fetch_latest_domain
+from state import load_state, save_state
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -34,11 +36,27 @@ async def main():
         await client.join(room.room_id)
         await client.room_send(room.room_id, "m.room.message",
             {"msgtype": "m.text", "body": "👋 Hey! I'm the StreamingCommunity bot — I'll keep the latest working link pinned right here, so you never have to go hunting for it again."})
+    
+    async def poll_loop():
+        interval = config["poll_interval_seconds"]
+        while True:
+            domain = await asyncio.to_thread(fetch_latest_domain)
+            if domain is not None and domain != load_state().get("domain"):
+                for r in client.rooms:
+                    response = await client.room_send(r, "m.room.message", {"msgtype": "m.text", "body": f"🔄 New StreamingCommunity link: https://{domain}"})
+                    if isinstance(response, RoomSendResponse):
+                        await client.room_put_state(r, "m.room.pinned_events", {"pinned": [response.event_id]})
+                    else:
+                        logger.error(f"Failed to send message in {r}: {response}")
+                save_state({"domain": domain})
+            await asyncio.sleep(interval)
 
     client.add_event_callback(on_invite, InviteMemberEvent)
 
-    await client.sync_forever(timeout=30000)
-
+    await asyncio.gather(
+        client.sync_forever(timeout=30000),
+        poll_loop(),
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())

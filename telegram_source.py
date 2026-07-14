@@ -19,7 +19,11 @@ def  verify_domain(domain: str) -> bool:
         return False
 
 def fetch_latest_domain():
-    html = requests.get("https://t.me/s/Streaming_community_sito", timeout=10)
+    try:
+        html = requests.get("https://t.me/s/Streaming_community_sito", timeout=10)
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Cannot reach Telegram channel: {e}")
+        return None
     matches = re.findall(r"<b>Nuovo:</b><br/>\s*<code>([^<]+)</code>", html.text)
     if matches:
         url = matches[-1]
