@@ -20,6 +20,7 @@ from nio import (
     AsyncClient,
     LoginResponse,
     InviteMemberEvent,
+    PowerLevelsEvent,
     RoomSendResponse,
     RoomPutStateResponse,
     RoomGetStateEventResponse,
@@ -74,8 +75,26 @@ async def main():
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
 
+    async def on_power_levels(room, event):
+        """When a room's power levels change, immediately (re)try posting+pinning the link there
+        instead of waiting for the next poll cycle — e.g. right after an admin grants the bot pin rights."""
+        if room.room_id not in client.rooms:
+            return
+        # Nothing to do unless the change actually lets the bot manage pinned events.
+        if not room.power_levels.can_user_send_state(room.own_user_id, "m.room.pinned_events"):
+            return
+        # Skip the work (and the domain fetch inside announce_link) if the link is already pinned;
+        # domain changes are handled by poll_loop.
+        info = load_state().get("rooms", {}).get(room.room_id, {})
+        if info.get("event_id") and info.get("pinned_event_id") == info.get("event_id"):
+            return
+        task = asyncio.create_task(announce_link(room.room_id))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+
     async def announce_link(room_id):
-        """Wait for the just-joined room to sync in, then post+pin the current link once."""
+        """Post+pin the current link in a room once. Used both right after a join and after a
+        power-level change; waits for the room to appear in client.rooms if the join is still syncing."""
         domain = await asyncio.to_thread(fetch_latest_domain)
         if domain is None:
             return  # couldn't resolve the domain now; poll_loop will handle it later
@@ -187,6 +206,7 @@ async def main():
             await asyncio.sleep(interval)
 
     client.add_event_callback(on_invite, InviteMemberEvent)
+    client.add_event_callback(on_power_levels, PowerLevelsEvent)
 
     try:
         await asyncio.gather(
