@@ -90,6 +90,18 @@ You don't need to restart the bot after changing its power level: it watches for
 power-level changes and pins the current link the moment it's granted the rights,
 rather than waiting for the next polling cycle.
 
+## Room history visibility
+
+Give the bot pin rights **and** make the room's history readable if you want people
+who join later to see the link right away. The pinned message is one the bot posted
+earlier, so a member who joins afterwards can only see it if the room's **history
+visibility** lets them read messages from before they joined.
+
+Set it to **Shared** (all members can read history) or **world-readable** (anyone
+can), under *Room Settings → Security & Privacy → Who can read history*. With the
+more restrictive *Members only (since they joined)* setting, new members won't see
+the already-posted link until the domain changes and the bot posts a fresh one.
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0 — see the [LICENSE](LICENSE) file for details.
