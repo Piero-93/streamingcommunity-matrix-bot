@@ -19,7 +19,8 @@ so the bot resolves the current one and shares it automatically.
 - **Keeps the link pinned**: it pins the newest link and unpins the previous one
   it had pinned, leaving any other pinned messages in the room untouched. A pin
   that fails (e.g. due to permissions) is retried on the next cycle without
-  re-sending the message.
+  re-sending the message — and as soon as the bot is granted pin rights it pins
+  immediately, without waiting for that cycle (see *Required Matrix permissions*).
 - **Optional self-healing** (`verify_pinned_link`): when enabled, on every cycle
   it re-checks on the server that its link is still present and pinned. If the
   message was unpinned it re-pins it; if it was deleted it re-posts and pins a
@@ -84,6 +85,10 @@ For pinning to work, the room admin must, in each room:
 If the bot's power level is below `events_default` it won't even be able to send
 messages (you'll see `M_FORBIDDEN … user_level (…) < send_level (…)` in the logs);
 raise it to at least 0 to post, and to 50 to also pin.
+
+You don't need to restart the bot after changing its power level: it watches for
+power-level changes and pins the current link the moment it's granted the rights,
+rather than waiting for the next polling cycle.
 
 ## License
 
