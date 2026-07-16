@@ -127,6 +127,13 @@ can), under *Room Settings → Security & Privacy → Who can read history*. Wit
 more restrictive *Members only (since they joined)* setting, new members won't see
 the already-posted link until the domain changes and the bot posts a fresh one.
 
+## Authors
+
+- **[Piero-93](https://github.com/Piero-93)** — development
+- **[astrogab42](https://github.com/astrogab42)** — ideas
+
+See the [AUTHORS](AUTHORS) file for the full list.
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0 — see the [LICENSE](LICENSE) file for details.
