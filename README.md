@@ -14,13 +14,15 @@ so the bot resolves the current one and shares it automatically.
   message, and then sends and pins the current link right away instead of waiting
   for the next poll cycle.
 - **Announces new links**: it periodically polls for the latest domain and, when
-  it changes, sends the new link to each room — once per room (it won't re-send
-  the same link, even across restarts).
-- **Keeps the link pinned**: it pins the newest link and unpins the previous one
-  it had pinned, leaving any other pinned messages in the room untouched. A pin
-  that fails (e.g. due to permissions) is retried on the next cycle without
-  re-sending the message — and as soon as the bot is granted pin rights it pins
-  immediately, without waiting for that cycle (see *Required Matrix permissions*).
+  it changes, updates each room — once per room (it won't re-send the same link,
+  even across restarts). By default it edits its existing message in place when
+  it's still the latest one; see [Link update mode](#link-update-mode).
+- **Keeps a single link pinned**: whenever it pins the current link it unpins
+  every other message it had pinned, so it always leaves exactly **one** of its
+  own links pinned — other users' pinned messages are left untouched. A pin that
+  fails (e.g. due to permissions) is retried on the next cycle without re-sending
+  the message — and as soon as the bot is granted pin rights it pins immediately,
+  without waiting for that cycle (see *Required Matrix permissions*).
 - **Optional self-healing** (`verify_pinned_link`): when enabled, on every cycle
   it re-checks on the server that its link is still present and pinned. If the
   message was unpinned it re-pins it; if it was deleted it re-posts and pins a
@@ -47,7 +49,9 @@ so the bot resolves the current one and shares it automatically.
      "password": "…",
      "poll_interval_seconds": 300,
      "allow_new_rooms": true,
-     "verify_pinned_link": false
+     "verify_pinned_link": false,
+     "link_update_mode": "edit",
+     "device_id": "streamingcommunity-bot"
    }
    ```
 
@@ -59,11 +63,32 @@ so the bot resolves the current one and shares it automatically.
 | `poll_interval_seconds` | number  | How often (in seconds) the bot checks for a new domain. Use a large value in production (e.g. `3600`); small values are only for testing.                                                          |
 | `allow_new_rooms`       | boolean | If `true`, the bot auto-joins rooms it's invited to; if `false`, it ignores new invites. Re-read on every invite, so it takes effect without a restart.                                            |
 | `verify_pinned_link`    | boolean | If `true`, every cycle the bot re-checks on the server that its link is still present and pinned, re-pinning or re-posting if not. Adds one extra request per room per cycle; disabled by default. |
+| `link_update_mode`      | string  | How the bot publishes a new link when the domain changes: `"edit"` (default) edits its existing message in place when it's still the latest one, otherwise reposts; `"repost"` always posts a new message. See [Link update mode](#link-update-mode). |
+| `device_id`             | string  | Fixed Matrix device ID the bot logs in with, so each login reuses the same device instead of creating a new one every time (which would eventually hit the account's device limit). Optional; defaults to `streamingcommunity-bot`. |
 
 3. Run it:
    ```sh
    python bot.py
    ```
+
+## Link update mode
+
+When the StreamingCommunity domain changes, the bot can publish the new link in
+two ways, selected with the `link_update_mode` config key:
+
+- **`edit`** (default): if the bot's link message is still the **latest message**
+  in the room, the bot **edits that message in place** to point at the new domain
+  and makes sure it's still pinned (re-pinning if needed) — no new message, the
+  same pinned message just updates. If someone else has posted since, the bot
+  unpins its own previous pins, posts a **new** link message and pins that.
+- **`repost`**: the bot **always posts a new** link message and pins it (unpinning
+  the previous link it had pinned). This is the original behaviour.
+
+**Tip:** for the tidiest result, set the room up so that **only the bot can post**
+(raise the room's *"Send messages"* level above regular members under *Room
+Settings → Roles & Permissions*, or give the bot a higher power level). Then in
+`edit` mode the bot always edits in place, so the room keeps a single,
+continuously updated pinned link instead of a growing list of messages.
 
 ## Required Matrix permissions
 
