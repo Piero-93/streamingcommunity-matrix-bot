@@ -21,8 +21,11 @@ from nio import (
     LoginResponse,
     InviteMemberEvent,
     PowerLevelsEvent,
+    RoomMessage,
+    MessageDirection,
     RoomSendResponse,
     RoomPutStateResponse,
+    RoomMessagesResponse,
     RoomGetStateEventResponse,
     RoomGetEventResponse,
 )
@@ -45,7 +48,9 @@ async def main():
     server = config["server"]
     user_id = config["user_id"]
     logger.info(f"Logging on {server} with user id {user_id}")
-    client = AsyncClient(server, user_id)
+    # Use a fixed device_id so each login reuses the same Matrix device instead of
+    # creating a new one every time (which would eventually hit the account's device limit).
+    client = AsyncClient(server, user_id, device_id=config.get("device_id", "streamingcommunity-bot"))
     response = await client.login(config["password"])
     if isinstance(response, LoginResponse):
         logger.info("Login successful")
@@ -108,27 +113,33 @@ async def main():
         if joined is None:
             logger.debug(f"Room {room_id} not synced yet; link will be posted on next poll")
             return
-        verify = load_config().get("verify_pinned_link", False)
+        cfg = load_config()
+        verify = cfg.get("verify_pinned_link", False)
+        mode = cfg.get("link_update_mode", "edit")
         async with state_lock:
             state = load_state()
             rooms_state = state.get("rooms", {})
-            await process_room(room_id, joined, domain, rooms_state, verify)
+            await process_room(room_id, joined, domain, rooms_state, verify, mode)
             state["rooms"] = rooms_state
             state["domain"] = domain
             save_state(state)
 
-    async def update_pins(room_id, old_event_id, new_event_id):
-        """Unpin the bot's previous link (if any), pin the new one, keep other pins."""
+    async def pin_bot_link(room_id, room, event_id):
+        """Pin the bot's current link and unpin every OTHER message the bot had pinned,
+        leaving other users' pins untouched — so the bot always keeps exactly one pinned link."""
         current = await client.room_get_state_event(room_id, "m.room.pinned_events")
-        if isinstance(current, RoomGetStateEventResponse):
-            pinned = list(current.content.get("pinned", []))
-        else:
-            pinned = []
-        if old_event_id in pinned:
-            pinned.remove(old_event_id)
-        if new_event_id not in pinned:
-            pinned.append(new_event_id)
-        return await client.room_put_state(room_id, "m.room.pinned_events", {"pinned": pinned})
+        pinned = list(current.content.get("pinned", [])) if isinstance(current, RoomGetStateEventResponse) else []
+        kept = []
+        for pid in pinned:
+            if pid == event_id:
+                continue  # re-added at the end
+            event = await client.room_get_event(room_id, pid)
+            sender = event.event.sender if isinstance(event, RoomGetEventResponse) else None
+            if sender != room.own_user_id:
+                kept.append(pid)  # keep other users' pins (and any pin we couldn't attribute)
+            # else: drop the bot's other pins
+        kept.append(event_id)
+        return await client.room_put_state(room_id, "m.room.pinned_events", {"pinned": kept})
 
     async def check_pinned_link(room_id, event_id):
         """Check the bot's link on the server. Returns 'ok', 'unpinned' or 'gone'."""
@@ -139,7 +150,33 @@ async def main():
         pinned = pins.content.get("pinned", []) if isinstance(pins, RoomGetStateEventResponse) else []
         return "ok" if event_id in pinned else "unpinned"
 
-    async def process_room(r, room, domain, rooms_state, verify):
+    def link_body(domain):
+        """The text of a link message for the given domain."""
+        return f"🔄 New StreamingCommunity link: https://{domain}"
+
+    async def edit_link_message(room_id, event_id, domain):
+        """Edit an existing link message in place (m.replace) to point at the new domain."""
+        body = link_body(domain)
+        return await client.room_send(room_id, "m.room.message", {
+            "msgtype": "m.text",
+            "body": f"* {body}",  # fallback shown by clients that don't render edits
+            "m.new_content": {"msgtype": "m.text", "body": body},
+            "m.relates_to": {"rel_type": "m.replace", "event_id": event_id},
+        })
+
+    async def latest_message_from_bot(room_id, room):
+        """Return True if the most recent message in the room was sent by the bot.
+        On error or if no message is found, return False (falls back to reposting, which is always safe)."""
+        response = await client.room_messages(
+            room_id, start=client.next_batch, direction=MessageDirection.back, limit=10)
+        if not isinstance(response, RoomMessagesResponse):
+            return False
+        for event in response.chunk:  # newest first when paginating back
+            if isinstance(event, RoomMessage):
+                return event.sender == room.own_user_id
+        return False
+
+    async def process_room(r, room, domain, rooms_state, verify, mode):
         """Send and/or pin the current link in one room, updating rooms_state in place."""
         room_label = f"{room.display_name} ({r})"
         info = rooms_state.get(r, {})
@@ -158,21 +195,33 @@ async def main():
                 logger.info(f"Bot link unpinned in {room_label}, re-pinning")
                 info["pinned_event_id"] = None
                 rooms_state[r] = info
-        # Send the message only if this room hasn't received the current link yet.
+        # Post/update the link only if this room doesn't have the current one yet.
         if info.get("domain") != domain:
-            response = await client.room_send(r, "m.room.message", {"msgtype": "m.text", "body": f"🔄 New StreamingCommunity link: https://{domain}"})
-            if not isinstance(response, RoomSendResponse):
-                logger.error(f"Failed to send message in {room_label}: {response}")
-                return
-            info["domain"] = domain
-            info["event_id"] = response.event_id
+            if mode == "edit" and info.get("event_id") and await latest_message_from_bot(r, room):
+                # The bot's message is still the latest: edit it in place instead of posting a new one.
+                response = await edit_link_message(r, info["event_id"], domain)
+                if not isinstance(response, RoomSendResponse):
+                    logger.error(f"Failed to edit link message in {room_label}: {response}")
+                    return
+                logger.info(f"Edited link in place in {room_label}")
+                info["domain"] = domain  # event_id unchanged: edits target the original event
+            else:
+                # Post a new link message (mode "repost", first post, or someone else spoke last).
+                response = await client.room_send(r, "m.room.message", {"msgtype": "m.text", "body": link_body(domain)})
+                if not isinstance(response, RoomSendResponse):
+                    logger.error(f"Failed to send message in {room_label}: {response}")
+                    return
+                info["domain"] = domain
+                info["event_id"] = response.event_id
+            # Force the pin step below to run so it (re)pins this link and drops any other bot pins.
+            info["pinned_event_id"] = None
             rooms_state[r] = info  # record the send even if the pin below fails
-        # Pin the current link if it isn't already pinned (also retries a previously failed pin).
+        # Pin the current link (and unpin the bot's other pins) if it isn't already the pinned one.
         if info.get("pinned_event_id") != info.get("event_id"):
             if not room.power_levels.can_user_send_state(room.own_user_id, "m.room.pinned_events"):
                 logger.debug(f"Skipping pin in {room_label}: no permission to manage pinned events")
             else:
-                pin_response = await update_pins(r, info.get("pinned_event_id"), info["event_id"])
+                pin_response = await pin_bot_link(r, room, info["event_id"])
                 if isinstance(pin_response, RoomPutStateResponse):
                     logger.info(f"Pinned message in {room_label}")
                     info["pinned_event_id"] = info["event_id"]
@@ -184,6 +233,7 @@ async def main():
         """Periodically fetch the latest domain and, per room, send+pin it once when it changes."""
         interval = config["poll_interval_seconds"]
         verify = config.get("verify_pinned_link", False)
+        mode = config.get("link_update_mode", "edit")
         # Wait for the first sync so client.rooms is populated before we act on it
         # (otherwise the first cycle would see no rooms and prune all saved state).
         await client.synced.wait()
@@ -194,7 +244,7 @@ async def main():
                     state = load_state()
                     rooms_state = state.get("rooms", {})
                     for r in list(client.rooms):
-                        await process_room(r, client.rooms[r], domain, rooms_state, verify)
+                        await process_room(r, client.rooms[r], domain, rooms_state, verify, mode)
                     # Drop state for rooms the bot is no longer a member of (kicked/left), so a
                     # future re-join is treated as fresh instead of "already sent".
                     for stale in [rid for rid in rooms_state if rid not in client.rooms]:

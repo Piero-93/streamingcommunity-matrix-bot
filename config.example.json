@@ -4,5 +4,7 @@
   "password": "your_password",
   "poll_interval_seconds": 3600,
   "allow_new_rooms": true,
-  "verify_pinned_link": false
+  "verify_pinned_link": false,
+  "link_update_mode": "edit",
+  "device_id": "streamingcommunity-bot"
 }
