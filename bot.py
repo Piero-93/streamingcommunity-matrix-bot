@@ -164,8 +164,8 @@ async def main():
             "m.relates_to": {"rel_type": "m.replace", "event_id": event_id},
         })
 
-    async def latest_message_from_bot(room_id, room):
-        """Return True if the most recent message in the room was sent by the bot.
+    async def latest_message_from_bot(room_id, event_id):
+        """Return True if the most recent message in the room is the given event, or an edit of it.
         On error or if no message is found, return False (falls back to reposting, which is always safe)."""
         response = await client.room_messages(
             room_id, start=client.next_batch, direction=MessageDirection.back, limit=10)
@@ -173,7 +173,10 @@ async def main():
             return False
         for event in response.chunk:  # newest first when paginating back
             if isinstance(event, RoomMessage):
-                return event.sender == room.own_user_id
+                if event.event_id == event_id:
+                    return True
+                relates = event.source.get("content", {}).get("m.relates_to", {})
+                return relates.get("rel_type") == "m.replace" and relates.get("event_id") == event_id
         return False
 
     async def process_room(r, room, domain, rooms_state, verify, mode):
@@ -197,7 +200,7 @@ async def main():
                 rooms_state[r] = info
         # Post/update the link only if this room doesn't have the current one yet.
         if info.get("domain") != domain:
-            if mode == "edit" and info.get("event_id") and await latest_message_from_bot(r, room):
+            if mode == "edit" and info.get("event_id") and await latest_message_from_bot(r, info["event_id"]):
                 # The bot's message is still the latest: edit it in place instead of posting a new one.
                 response = await edit_link_message(r, info["event_id"], domain)
                 if not isinstance(response, RoomSendResponse):
