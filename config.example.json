@@ -3,6 +3,8 @@
   "user_id": "@your_bot_account:matrix.org",
   "password": "your_password",
   "poll_interval_seconds": 3600,
+  "retry_attempts": 2,
+  "retry_delay_seconds": 60,
   "allow_new_rooms": true,
   "verify_pinned_link": false,
   "link_update_mode": "edit",

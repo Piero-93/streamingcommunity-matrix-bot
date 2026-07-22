@@ -31,7 +31,16 @@ so the bot resolves the current one and shares it automatically.
   (e.g. the matrix.org official/system room) are skipped instead of erroring.
 - **Cleans up after itself**: when the bot is removed from (or leaves) a room, its
   saved state for that room is dropped, so if it's ever re-invited the room is
-  treated as fresh.
+  treated as fresh. This also happens as soon as a send/edit/pin is refused because
+  the bot is no longer in the room (`M_FORBIDDEN … not in room`), even if its local
+  room list hasn't caught up with the removal yet.
+- **Safe under transient failures**: if the bot can't read the room timeline or
+  re-check its link (e.g. a temporary homeserver/token hiccup), it skips that room
+  instead of assuming the worst and posting a **duplicate** link. It only ever
+  reposts when it's sure its message is no longer the latest. Rather than waiting
+  the whole poll interval, it retries the cycle a few times a short delay apart
+  (see `retry_attempts` / `retry_delay_seconds`), and only falls back to the next
+  cycle if it's still failing.
 
 ## Setup
 
@@ -48,6 +57,8 @@ so the bot resolves the current one and shares it automatically.
      "user_id": "@yourbot:matrix.org",
      "password": "…",
      "poll_interval_seconds": 300,
+     "retry_attempts": 2,
+     "retry_delay_seconds": 60,
      "allow_new_rooms": true,
      "verify_pinned_link": false,
      "link_update_mode": "edit",
@@ -61,6 +72,8 @@ so the bot resolves the current one and shares it automatically.
 | `user_id`               | string  | Full Matrix ID of the bot account, in the form `@name:server`.                                                                                                                                     |
 | `password`              | string  | Password for the bot account, used to log in. Keep it secret — `config.json` is git-ignored.                                                                                                       |
 | `poll_interval_seconds` | number  | How often (in seconds) the bot checks for a new domain. Use a large value in production (e.g. `3600`); small values are only for testing.                                                          |
+| `retry_attempts`        | number  | On a transient error (domain unresolved, or an unreadable/failed Matrix request), how many extra times to retry the cycle before waiting for the next one instead of skipping straight to it. Optional; defaults to `2`. Set to `0` to disable retries. |
+| `retry_delay_seconds`   | number  | How long (in seconds) to wait between retry attempts. Optional; defaults to `60`.                                                                                                                  |
 | `allow_new_rooms`       | boolean | If `true`, the bot auto-joins rooms it's invited to; if `false`, it ignores new invites. Re-read on every invite, so it takes effect without a restart.                                            |
 | `verify_pinned_link`    | boolean | If `true`, every cycle the bot re-checks on the server that its link is still present and pinned, re-pinning or re-posting if not. Adds one extra request per room per cycle; disabled by default. |
 | `link_update_mode`      | string  | How the bot publishes a new link when the domain changes: `"edit"` (default) edits its existing message in place when it's still the latest one, otherwise reposts; `"repost"` always posts a new message. See [Link update mode](#link-update-mode). |
