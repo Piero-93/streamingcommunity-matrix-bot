@@ -36,6 +36,15 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
+def not_in_room_error(response):
+    """True if a failed Matrix response means the bot is no longer a member of the room.
+    nio's local room list can lag behind the server (e.g. during a homeserver hiccup), so a
+    send/edit/pin can fail with M_FORBIDDEN '… not in room …' even while client.rooms still
+    lists the room. We detect that here to prune the room's state instead of retrying forever."""
+    return (getattr(response, "status_code", None) == "M_FORBIDDEN"
+            and "not in room" in str(getattr(response, "message", "")).lower())
+
+
 def load_config():
     """Load the bot configuration (server, credentials, poll settings) from config.json."""
     with open("config.json") as f:
@@ -142,12 +151,18 @@ async def main():
         return await client.room_put_state(room_id, "m.room.pinned_events", {"pinned": kept})
 
     async def check_pinned_link(room_id, event_id):
-        """Check the bot's link on the server. Returns 'ok', 'unpinned' or 'gone'."""
+        """Check the bot's link on the server. Returns 'ok', 'unpinned', 'gone' or 'error'.
+        'error' means we couldn't determine the state (e.g. a transient token/network failure);
+        the caller must skip rather than assume the link is gone and re-post a duplicate."""
         event = await client.room_get_event(room_id, event_id)
-        if not isinstance(event, RoomGetEventResponse) or getattr(event.event, "body", None) is None:
-            return "gone"  # message deleted/redacted or not retrievable
+        if not isinstance(event, RoomGetEventResponse):
+            return "error"  # couldn't read the event; don't assume it's gone
+        if getattr(event.event, "body", None) is None:
+            return "gone"  # message actually deleted/redacted
         pins = await client.room_get_state_event(room_id, "m.room.pinned_events")
-        pinned = pins.content.get("pinned", []) if isinstance(pins, RoomGetStateEventResponse) else []
+        if not isinstance(pins, RoomGetStateEventResponse):
+            return "error"  # couldn't read pins; don't assume it's unpinned
+        pinned = pins.content.get("pinned", [])
         return "ok" if event_id in pinned else "unpinned"
 
     def link_body(domain):
@@ -165,12 +180,15 @@ async def main():
         })
 
     async def latest_message_from_bot(room_id, event_id):
-        """Return True if the most recent message in the room is the given event, or an edit of it.
-        On error or if no message is found, return False (falls back to reposting, which is always safe)."""
+        """Return True if the most recent message in the room is the given event (or an edit of it),
+        False if it's definitely not (someone spoke after, or it's not in the recent history), or
+        None if we couldn't tell (e.g. a transient token/network failure reading the timeline).
+        On None the caller must skip this cycle: reposting on a read error would create a duplicate
+        instead of editing the still-current message."""
         response = await client.room_messages(
             room_id, start=client.next_batch, direction=MessageDirection.back, limit=10)
         if not isinstance(response, RoomMessagesResponse):
-            return False
+            return None  # couldn't read the timeline; don't assume we're not the latest
         for event in response.chunk:  # newest first when paginating back
             if isinstance(event, RoomMessage):
                 if event.event_id == event_id:
@@ -190,6 +208,9 @@ async def main():
         # Optionally re-check on the server that a previously posted link is still there and pinned.
         if verify and info.get("domain") == domain and info.get("event_id") and info.get("pinned_event_id") == info["event_id"]:
             status = await check_pinned_link(r, info["event_id"])
+            if status == "error":
+                logger.warning(f"Couldn't verify link in {room_label}; skipping this cycle, will retry")
+                return  # don't assume it's gone and re-post a duplicate over a transient error
             if status == "gone":
                 logger.info(f"Bot link missing in {room_label}, re-posting")
                 info = {}
@@ -200,10 +221,21 @@ async def main():
                 rooms_state[r] = info
         # Post/update the link only if this room doesn't have the current one yet.
         if info.get("domain") != domain:
-            if mode == "edit" and info.get("event_id") and await latest_message_from_bot(r, info["event_id"]):
+            do_edit = False
+            if mode == "edit" and info.get("event_id"):
+                is_latest = await latest_message_from_bot(r, info["event_id"])
+                if is_latest is None:
+                    logger.warning(f"Couldn't read timeline in {room_label}; skipping this cycle, will retry")
+                    return  # can't tell if we're still the latest: skip rather than repost a duplicate
+                do_edit = is_latest
+            if do_edit:
                 # The bot's message is still the latest: edit it in place instead of posting a new one.
                 response = await edit_link_message(r, info["event_id"], domain)
                 if not isinstance(response, RoomSendResponse):
+                    if not_in_room_error(response):
+                        logger.info(f"Bot no longer in {room_label}, dropping its state")
+                        rooms_state.pop(r, None)
+                        return
                     logger.error(f"Failed to edit link message in {room_label}: {response}")
                     return
                 logger.info(f"Edited link in place in {room_label}")
@@ -212,6 +244,10 @@ async def main():
                 # Post a new link message (mode "repost", first post, or someone else spoke last).
                 response = await client.room_send(r, "m.room.message", {"msgtype": "m.text", "body": link_body(domain)})
                 if not isinstance(response, RoomSendResponse):
+                    if not_in_room_error(response):
+                        logger.info(f"Bot no longer in {room_label}, dropping its state")
+                        rooms_state.pop(r, None)
+                        return
                     logger.error(f"Failed to send message in {room_label}: {response}")
                     return
                 info["domain"] = domain
@@ -229,6 +265,9 @@ async def main():
                     logger.info(f"Pinned message in {room_label}")
                     info["pinned_event_id"] = info["event_id"]
                     rooms_state[r] = info
+                elif not_in_room_error(pin_response):
+                    logger.info(f"Bot no longer in {room_label}, dropping its state")
+                    rooms_state.pop(r, None)
                 else:
                     logger.error(f"Failed to pin message in {room_label}: {pin_response}")
 

@@ -31,7 +31,14 @@ so the bot resolves the current one and shares it automatically.
   (e.g. the matrix.org official/system room) are skipped instead of erroring.
 - **Cleans up after itself**: when the bot is removed from (or leaves) a room, its
   saved state for that room is dropped, so if it's ever re-invited the room is
-  treated as fresh.
+  treated as fresh. This also happens as soon as a send/edit/pin is refused because
+  the bot is no longer in the room (`M_FORBIDDEN … not in room`), even if its local
+  room list hasn't caught up with the removal yet.
+- **Safe under transient failures**: if the bot can't read the room timeline or
+  re-check its link (e.g. a temporary homeserver/token hiccup), it skips that room
+  for the cycle and retries on the next one instead of assuming the worst and
+  posting a **duplicate** link. It only ever reposts when it's sure its message is
+  no longer the latest.
 
 ## Setup
 
